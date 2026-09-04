@@ -1,4 +1,6 @@
-Patient_ID,v1,v2,v3
-PT-101,14.5,4.2,1.8
-PT-102,8.0,2.1,0.5
-PT-103,28.4,12.0,5.5
+patient_id,wbc,creatinine,baseline_scr,shock,ileus,megacolon,recurrences,prior_regimen,age,temp,albumin,concomitant_abx
+PT_NON_SEVERE_01,9500,1.0,0.9,0,0,0,0,none,52,37.2,3.8,0
+PT_SEVERE_02,18500,1.8,1.0,0,0,0,0,none,68,38.5,2.9,1
+PT_FULMINANT_03,28000,2.6,1.1,1,1,0,0,none,74,39.1,2.1,1
+PT_RECURRENT_04,11000,1.1,1.0,0,0,0,1,VANCOMYCIN,65,37.6,3.4,0
+

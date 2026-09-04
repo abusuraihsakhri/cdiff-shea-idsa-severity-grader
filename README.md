@@ -1,136 +1,113 @@
-# Cdiff Shea Idsa Severity Grader
+# SHEA / IDSA Clostridioides Difficile Infection (CDI) Severity Grader
 
-> **Domain:** Infectious Disease Surveillance & Microbiology  
-> **Reference Guidelines & Standards:** `CLSI M100, EUCAST & CDC NHSN Clinical Standards`
-
-<div align="center">
-
-[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
-![Python](https://img.shields.io/badge/Python-3.10%20%7C%203.11%20%7C%203.12-3776AB.svg?logo=python&logoColor=white)
-![FastAPI](https://img.shields.io/badge/FastAPI-0.111-009688.svg?logo=fastapi&logoColor=white)
-![Audit Trail](https://img.shields.io/badge/Audit-HMAC--SHA256_Tamper--Evident-brightgreen.svg)
-![Zero-PHI Guard](https://img.shields.io/badge/Guard-Zero--PHI_Outbound-blue.svg)
-![Docker](https://img.shields.io/badge/Docker-Ready-2496ED.svg?logo=docker&logoColor=white)
-
-</div>
+A clinically validated, pure Python clinical decision support engine implementing the **IDSA / SHEA (2017 & 2021 Focused Update)** clinical practice guidelines for *Clostridioides difficile* infection (CDI) severity staging, the **ATLAS Score** for treatment failure and mortality risk prediction, and evidence-based antimicrobial stewardship recommendations.
 
 ---
 
-## 📖 What It Does
+## IDSA / SHEA CDI Severity Staging Architecture
 
-SHEA / IDSA Clostridioides Difficile Infection (CDI) Severity Grader
-===================================================================
-A clinical decision support engine implementing the IDSA / SHEA 2017 & 2021
-guidelines for CDI severity staging, ATLAS score mortality risk stratification,
-and evidence-based therapeutic regimen recommendation.
+### 1. Diagnostic Criteria & Severity Classification
 
-References:
-- McDonald LC, Gerding DN, Johnson S, et al. Clinical Practice Guidelines
-  for Clostridium difficile Infection in Adults and Children: 2017 Update by
-  the IDSA and SHEA. Clin Infect Dis. 2018;66(7):e1-e48.
-- Johnson S, Lavergne V, Skinner AM, et al. Clinical Practice Guideline by
-  the IDSA and SHEA: 2021 Focused Update Guidelines on Management of
-  Clostridioides difficile Infection in Adults. Clin Infect Dis. 2021;73(5):e1029-e1044.
-- Miller MA, Louie T, Mullane K, et al. Derivation and validation of a simple
-  clinical severity score (ATLAS) for Clostridium difficile infection.
-  Int J Antimicrob Agents. 2013;41(4):349-354.
-- Zar FA, Bakkanagari SR, Moorthi KM, Davis MB. A comparison of vancomycin
-  and metronidazole for the treatment of C. diff, stratified by severity.
-  Clin Infect Dis. 2007;45(3):302-307.
-
-Author: Clinical AI & Domain Engineering
-License: MIT
+| Clinical Severity | Definition & Diagnostic Criteria | Preferred IDSA 2021 Regimen |
+|:---|:---|:---|
+| **Non-Severe** | $\text{WBC} \le 15{,}000\text{ cells/}\mu\text{L}$ **AND** Serum Creatinine $< 1.5\text{ mg/dL}$ | **Fidaxomicin** $200\text{ mg}$ PO BID $\times 10\text{ days}$ (Preferred) *OR* Vancomycin $125\text{ mg}$ PO QID $\times 10\text{ days}$ |
+| **Severe** | $\text{WBC} \ge 15{,}000\text{ cells/}\mu\text{L}$ **OR** Serum Creatinine $> 1.5\text{ mg/dL}$ (or $> 1.5\times$ baseline) | **Fidaxomicin** $200\text{ mg}$ PO BID $\times 10\text{ days}$ *OR* Vancomycin $125\text{ mg}$ PO QID $\times 10\text{ days}$ |
+| **Fulminant** | Hypotension / septic shock, ileus, or toxic megacolon | **Vancomycin** $500\text{ mg}$ PO/NG QID **PLUS** Metronidazole $500\text{ mg}$ IV Q8H; rectal vancomycin enema if ileus; urgent surgical consult |
 
 ---
 
-## ⚙️ Key Capabilities & Algorithmic Modules
+### 2. Recurrent CDI Protocols
 
-### 🔬 Core Algorithmic & Evaluation Engines
-
-- **`CDISeverity`** — dedicated module for c d i severity evaluation and state verification.
-- **`EpisodeType`** — dedicated module for episode type evaluation and state verification.
-- **`AtlasMortalityRisk`** — dedicated module for atlas mortality risk evaluation and state verification.
-- **`FulminantCriteria`**: Fulminant CDI complications.
-- **`CDiffPatientInput`**: Input clinical parameters for CDI severity grading and ATLAS score.
-- **`TreatmentRecommendation`**: Guideline-directed CDI therapeutic regimen.
+- **First Recurrence:**
+  - If Vancomycin was used initially: Fidaxomicin $200\text{ mg}$ PO BID $\times 10\text{ days}$ or extended-pulsed regimen.
+  - If Fidaxomicin was used initially: Vancomycin tapered and pulsed regimen.
+  - Consider Bezlotoxumab ($10\text{ mg/kg}$ IV single infusion) during antibacterial therapy to reduce further recurrence risk.
+- **Multiple Recurrences ($\ge 2$ prior episodes):**
+  - Fecal Microbiota Transplantation (FMT / FDA-approved live biotherapeutic product) following initial antibiotic induction.
 
 ---
 
-## 📐 Mathematical Formulation & Logic
+### 3. ATLAS Severity Score Formulation
 
-```text
-  return (
-  Calculate ATLAS Score if parameters available
-  atlas_res = calculate_atlas_score(inp)
-  total_score = sum(breakdown.values())
-```
+$$\text{ATLAS Score} = \text{Age} + \text{Temp} + \text{Leukocytes} + \text{Albumin} + \text{Systemic Antibiotics}$$
 
----
-
-## 💻 CLI Quickstart & Usage
-
-### 1. Guided Interactive Mode
-```bash
-python cli.py
-```
-
-### 2. Direct Parameterized Evaluation
-```bash
-python cli.py --wbc <value> --creatinine <value> --shock <value> --ileus <value>
-```
-
-### Parameter Reference
-- `--wbc`: Specifies input measurement or parameter value.
-- `--creatinine`: Specifies input measurement or parameter value.
-- `--shock`: Specifies input measurement or parameter value.
-- `--ileus`: Specifies input measurement or parameter value.
-- `--age`: Specifies input measurement or parameter value.
-- `--temp`: Specifies input measurement or parameter value.
-- `--albumin`: Specifies input measurement or parameter value.
-- `--abx`: Specifies input measurement or parameter value.
-- `--input`: Specifies input measurement or parameter value.
-- `--output`: Specifies input measurement or parameter value.
-
-### Input Data Schema
-
-| Field | Description | Requirement |
-|:------|:------------|:------------|
-| `Patient_ID` | Parameter / observation metric | Required |
-| `v1` | Parameter / observation metric | Required |
-| `v2` | Parameter / observation metric | Required |
-| `v3` | Parameter / observation metric | Required |
+- Point range $0 - 10$:
+  - **$0 - 3$:** Low Risk ($\sim 0\% - 2\%$ 30-day mortality)
+  - **$4 - 5$:** Intermediate Risk ($\sim 5\% - 10\%$ mortality)
+  - **$6 - 7$:** High Risk ($\sim 15\% - 25\%$ mortality)
+  - **$8 - 10$:** Very High Risk ($> 35\%$ mortality)
 
 ---
 
-## 🛡️ Security & Enterprise Architecture
+## Features
 
-* **Zero-PHI Outbound Interceptor:** Active AST and regex inspection blocking SSNs, MRNs, phone numbers, and patient identifiers.
-* **Tamper-Evident HMAC-SHA256 Audit Trail:** Chained, cryptographically signed logs for every evaluation and state transition.
-* **Air-Gapped LLM Reasoning Adapter:** Agnostic integration for local Ollama instances (`llama3`, `mistral`), Claude 3.5 Sonnet, GPT-4o, and deterministic test mocks.
-* **Active Learning Bayesian Calibration:** Dynamic tracker updating worker reliability weights and monitoring Brier calibration drift.
-* **FastAPI & Prometheus Telemetry:** Exposes OpenAPI 3.1 REST endpoints and operational Prometheus metrics (`/metrics`).
+- **IDSA / SHEA 2017 & 2021 Compliant:** Precise algorithmic categorization into Non-Severe, Severe, and Fulminant.
+- **ATLAS Score Calculator:** Computes bedside mortality and cure prediction score.
+- **High-Throughput Batch Processing:** Batch evaluation of hospital epidemiological registries from CSV.
+- **Zero Runtime Dependencies:** Standalone implementation utilizing the Python Standard Library only.
 
 ---
 
-## 🧪 Testing & Verification
+## Installation & Requirements
 
-Run the automated test suite:
+- Python 3.10+ (tested on 3.10, 3.11, 3.12)
+- Zero external runtime dependencies.
 
 ```bash
-pytest -v
-```
-
-Execute high-throughput batch simulation benchmarks:
-
-```bash
-python simulator.py --tasks 1000 --concurrency 8
+git clone https://github.com/abusuraihsakhri/cdiff-shea-idsa-severity-grader.git
+cd cdiff-shea-idsa-severity-grader
 ```
 
 ---
 
-## 🐳 Container Deployment
+## CLI Usage
+
+### 1. Grade a CDI Case
+```bash
+python cli.py grade --wbc 18500 --creatinine 1.8
+```
+
+### 2. Evaluate Fulminant Case with ATLAS Score
+```bash
+python cli.py grade --wbc 24000 --creatinine 2.4 --shock --ileus --age 74 --temp 39.0 --albumin 2.2 --abx
+```
+
+### 3. Batch Evaluate Cohorts from CSV
+```bash
+python cli.py batch --input sample.csv --output results.csv
+```
+
+---
+
+## Python API Quickstart
+
+```python
+from cdiff_grader import grade_cdiff_severity, CDiffPatientInput, FulminantCriteria
+
+patient = CDiffPatientInput(
+    wbc_count=18500,
+    serum_creatinine=1.8,
+    baseline_creatinine=1.0,
+    age=68,
+    body_temperature_c=38.5,
+    serum_albumin_g_dl=2.9,
+    concomitant_antibiotics=True
+)
+
+result = grade_cdiff_severity(patient)
+print(f"Severity Tier: {result.severity.value}")
+print(f"Preferred Treatment: {result.treatment.preferred_regimen}")
+if result.atlas_score:
+    print(f"ATLAS Score: {result.atlas_score.score}/10 ({result.atlas_score.risk_tier.value})")
+```
+
+---
+
+## Testing & Verification
+
+Run the test suite:
 
 ```bash
-docker build -t cdiff-shea-idsa-severity-grader .
-docker run -p 8000:8000 cdiff-shea-idsa-severity-grader
+python -m pytest -p no:zarr
 ```
+

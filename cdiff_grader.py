@@ -447,23 +447,32 @@ def _parse_dict_to_patient_input(d: Dict[str, Any]) -> CDiffPatientInput:
     base_scr_val = float(base_scr) if base_scr is not None and str(base_scr).strip() != "" else None
 
     # Fulminant criteria parsing
+    def _to_bool(val: Any) -> bool:
+        if isinstance(val, bool):
+            return val
+        if val is None:
+            return False
+        s = str(val).strip().lower()
+        return s in ["true", "1", "yes", "y", "t"]
+
     fulm_in = d.get("fulminant_criteria")
     if isinstance(fulm_in, dict):
         fulm = FulminantCriteria(
-            hypotension_or_shock=bool(fulm_in.get("hypotension_or_shock", False)),
-            ileus=bool(fulm_in.get("ileus", False)),
-            toxic_megacolon=bool(fulm_in.get("toxic_megacolon", False)),
-            bowel_perforation_or_peritonitis=bool(fulm_in.get("bowel_perforation_or_peritonitis", False)),
-            icu_admission_for_cdi=bool(fulm_in.get("icu_admission_for_cdi", False)),
+            hypotension_or_shock=_to_bool(fulm_in.get("hypotension_or_shock")),
+            ileus=_to_bool(fulm_in.get("ileus")),
+            toxic_megacolon=_to_bool(fulm_in.get("toxic_megacolon")),
+            bowel_perforation_or_peritonitis=_to_bool(fulm_in.get("bowel_perforation_or_peritonitis")),
+            icu_admission_for_cdi=_to_bool(fulm_in.get("icu_admission_for_cdi")),
         )
     else:
         fulm = FulminantCriteria(
-            hypotension_or_shock=bool(d.get("hypotension", False) or d.get("shock", False)),
-            ileus=bool(d.get("ileus", False)),
-            toxic_megacolon=bool(d.get("toxic_megacolon", False) or d.get("megacolon", False)),
-            bowel_perforation_or_peritonitis=bool(d.get("perforation", False) or d.get("peritonitis", False)),
-            icu_admission_for_cdi=bool(d.get("icu", False) or d.get("icu_admission", False)),
+            hypotension_or_shock=_to_bool(d.get("hypotension")) or _to_bool(d.get("shock")),
+            ileus=_to_bool(d.get("ileus")),
+            toxic_megacolon=_to_bool(d.get("toxic_megacolon")) or _to_bool(d.get("megacolon")),
+            bowel_perforation_or_peritonitis=_to_bool(d.get("perforation")) or _to_bool(d.get("peritonitis")),
+            icu_admission_for_cdi=_to_bool(d.get("icu")) or _to_bool(d.get("icu_admission")),
         )
+
 
     # Episode parsing
     rec_count = int(float(d.get("prior_recurrence_count", d.get("recurrences", 0))))
