@@ -3,12 +3,12 @@
 SHEA / IDSA C. Difficile Severity Grader CLI
 ============================================
 Command line interface for C. difficile infection staging,
-ATLAS mortality risk prediction, and antimicrobial stewardship guidance.
+ATLAS treatment-response scoring, and antimicrobial stewardship guidance.
 
 Usage:
     python cli.py grade --wbc 18500 --creatinine 1.8
     python cli.py grade --wbc 22000 --creatinine 2.4 --shock --ileus
-    python cli.py atlas --age 74 --temp 38.8 --wbc 19000 --albumin 2.3 --abx
+    python cli.py atlas --age 74 --wbc 19000 --creatinine 2.0 --albumin 2.3 --abx
     python cli.py interactive
     python cli.py batch --input cdiff_patients.csv --output results.csv
 """
@@ -81,8 +81,8 @@ def run_grade(args: argparse.Namespace) -> int:
 
     if res.atlas_score:
         print("-" * 70)
-        print(f"ATLAS Score:         {res.atlas_score.score}/10 ({res.atlas_score.risk_tier.value})")
-        print(f"Predicted Mortality: {res.atlas_score.predicted_mortality_percentage}")
+        print(f"ATLAS Score:         {res.atlas_score.score}/10 ({res.atlas_score.score_band.value})")
+        print(f"Estimated Cure Rate: {res.atlas_score.estimated_cure_rate_percentage:.1f}%")
 
     print("-" * 70)
     print("GUIDELINE-DIRECTED THERAPEUTIC REGIMEN (IDSA/SHEA 2021):")
@@ -106,7 +106,7 @@ def run_grade(args: argparse.Namespace) -> int:
 def run_atlas(args: argparse.Namespace) -> int:
     inp = CDiffPatientInput(
         wbc_count=args.wbc,
-        serum_creatinine=1.0,
+        serum_creatinine=args.creatinine,
         age=args.age,
         body_temperature_c=args.temp,
         serum_albumin_g_dl=args.albumin,
@@ -119,11 +119,11 @@ def run_atlas(args: argparse.Namespace) -> int:
         return 0
 
     print("=" * 65)
-    print("  ATLAS C. DIFFICILE MORTALITY SCORE (Miller et al., 2013)")
+    print("  ATLAS C. DIFFICILE TREATMENT-RESPONSE SCORE (Miller et al., 2013)")
     print("=" * 65)
     print(f"Total ATLAS Score:   {res.score} / 10")
-    print(f"Risk Stratification: {res.risk_tier.value}")
-    print(f"Mortality Estimate:  {res.predicted_mortality_percentage}")
+    print(f"Score Band:          {res.score_band.value}")
+    print(f"Estimated Cure Rate: {res.estimated_cure_rate_percentage:.1f}%")
     print("-" * 65)
     print("Component Points Breakdown:")
     for k, v in res.component_breakdown.items():
@@ -142,7 +142,13 @@ def run_batch(args: argparse.Namespace) -> int:
         rows = list(reader)
         fieldnames = list(reader.fieldnames or [])
 
-    out_fields = fieldnames + ["cdi_severity", "preferred_treatment", "atlas_score", "atlas_mortality_risk"]
+    out_fields = fieldnames + [
+        "cdi_severity",
+        "preferred_treatment",
+        "atlas_score",
+        "atlas_score_band",
+        "atlas_estimated_cure_rate_pct",
+    ]
     out_rows = []
 
     for r in rows:
@@ -152,14 +158,18 @@ def run_batch(args: argparse.Namespace) -> int:
             row_dict["cdi_severity"] = res.severity.value
             row_dict["preferred_treatment"] = res.treatment.preferred_regimen
             row_dict["atlas_score"] = res.atlas_score.score if res.atlas_score else "N/A"
-            row_dict["atlas_mortality_risk"] = res.atlas_score.risk_tier.value if res.atlas_score else "N/A"
+            row_dict["atlas_score_band"] = res.atlas_score.score_band.value if res.atlas_score else "N/A"
+            row_dict["atlas_estimated_cure_rate_pct"] = (
+                res.atlas_score.estimated_cure_rate_percentage if res.atlas_score else "N/A"
+            )
             out_rows.append(row_dict)
         except Exception as e:
             row_dict = dict(r)
             row_dict["cdi_severity"] = f"ERROR: {e}"
             row_dict["preferred_treatment"] = ""
             row_dict["atlas_score"] = ""
-            row_dict["atlas_mortality_risk"] = ""
+            row_dict["atlas_score_band"] = ""
+            row_dict["atlas_estimated_cure_rate_pct"] = ""
             out_rows.append(row_dict)
 
     with open(args.output, "w", encoding="utf-8", newline="") as f:
@@ -209,9 +219,9 @@ def run_interactive(args: argparse.Namespace) -> int:
     if recs > 0:
         prior_tx = input("   Prior treatment regimen (VANCOMYCIN / FIDAXOMICIN / METRONIDAZOLE): ").strip()
 
-    print("\n5. Optional Parameters for ATLAS Score:")
+    print("\n5. ATLAS Score Parameters:")
     age = ask_int("   Patient Age (years)", 65)
-    temp = ask_float("   Peak Body Temperature (Celsius, e.g. 38.2)", 37.5)
+    temp = None
     alb = ask_float("   Serum Albumin (g/dL, e.g. 3.2)", 3.2)
     abx = ask_bool("   Concomitant non-CDI systemic antibiotics ongoing?")
 
@@ -247,7 +257,11 @@ def run_interactive(args: argparse.Namespace) -> int:
     print(f"Severity Stage:      {res.severity.value}")
     print(f"Rationale:           {res.severity_rationale}")
     if res.atlas_score:
-        print(f"ATLAS Score:         {res.atlas_score.score}/10 ({res.atlas_score.risk_tier.value}, {res.atlas_score.predicted_mortality_percentage})")
+        print(
+            f"ATLAS Score:         {res.atlas_score.score}/10 "
+            f"({res.atlas_score.score_band.value}, "
+            f"estimated cure {res.atlas_score.estimated_cure_rate_percentage:.1f}%)"
+        )
     print("-" * 70)
     print(f"Preferred Therapy:   {res.treatment.preferred_regimen}")
     if res.treatment.alternative_regimen:
@@ -260,7 +274,7 @@ def run_interactive(args: argparse.Namespace) -> int:
 
 def main(argv: Optional[List[str]] = None) -> int:
     parser = argparse.ArgumentParser(
-        description="SHEA/IDSA C. Difficile Severity Grader & ATLAS Mortality Engine"
+        description="SHEA/IDSA C. Difficile Severity Grader & ATLAS Score Calculator"
     )
     subparsers = parser.add_subparsers(dest="command", help="Available subcommands")
 
@@ -284,10 +298,21 @@ def main(argv: Optional[List[str]] = None) -> int:
     g_p.add_argument("--json", action="store_true", help="Output JSON format")
 
     # ATLAS subcommand
-    a_p = subparsers.add_parser("atlas", help="Compute ATLAS mortality risk score")
+    a_p = subparsers.add_parser("atlas", help="Compute the ATLAS treatment-response score")
     a_p.add_argument("--age", type=int, required=True, help="Patient age")
-    a_p.add_argument("--temp", type=float, required=True, help="Body temperature (Celsius)")
+    a_p.add_argument(
+        "--temp",
+        type=float,
+        help="Deprecated compatibility option; temperature is not used by the ATLAS score",
+    )
     a_p.add_argument("--wbc", type=float, required=True, help="WBC count (cells/uL)")
+    a_p.add_argument(
+        "--creatinine",
+        "--scr",
+        type=float,
+        required=True,
+        help="Serum creatinine (mg/dL)",
+    )
     a_p.add_argument("--albumin", type=float, required=True, help="Serum albumin (g/dL)")
     a_p.add_argument("--abx", action="store_true", help="Concurrent non-CDI antibiotics")
     a_p.add_argument("--json", action="store_true", help="Output JSON format")

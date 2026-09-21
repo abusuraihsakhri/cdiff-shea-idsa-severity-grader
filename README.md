@@ -1,113 +1,155 @@
-# SHEA / IDSA Clostridioides Difficile Infection (CDI) Severity Grader
+# CDI Severity Grader
 
-A clinically validated, pure Python clinical decision support engine implementing the **IDSA / SHEA (2017 & 2021 Focused Update)** clinical practice guidelines for *Clostridioides difficile* infection (CDI) severity staging, the **ATLAS Score** for treatment failure and mortality risk prediction, and evidence-based antimicrobial stewardship recommendations.
+A small Python and browser-based tool for classifying adult *Clostridioides difficile* infection (CDI) severity using IDSA/SHEA criteria and calculating the published ATLAS treatment-response score.
 
----
+The repository provides the same core grading logic through a command-line interface, Python API, CSV batch processor, and a browser interface powered by Pyodide.
 
-## IDSA / SHEA CDI Severity Staging Architecture
+> **Clinical scope:** This software is for education and decision support. It does not establish the diagnosis of CDI, replace clinical judgment, or account for every patient-specific contraindication, comorbidity, local formulary, or institutional policy.
 
-### 1. Diagnostic Criteria & Severity Classification
+## What it implements
 
-| Clinical Severity | Definition & Diagnostic Criteria | Preferred IDSA 2021 Regimen |
-|:---|:---|:---|
-| **Non-Severe** | $\text{WBC} \le 15{,}000\text{ cells/}\mu\text{L}$ **AND** Serum Creatinine $< 1.5\text{ mg/dL}$ | **Fidaxomicin** $200\text{ mg}$ PO BID $\times 10\text{ days}$ (Preferred) *OR* Vancomycin $125\text{ mg}$ PO QID $\times 10\text{ days}$ |
-| **Severe** | $\text{WBC} \ge 15{,}000\text{ cells/}\mu\text{L}$ **OR** Serum Creatinine $> 1.5\text{ mg/dL}$ (or $> 1.5\times$ baseline) | **Fidaxomicin** $200\text{ mg}$ PO BID $\times 10\text{ days}$ *OR* Vancomycin $125\text{ mg}$ PO QID $\times 10\text{ days}$ |
-| **Fulminant** | Hypotension / septic shock, ileus, or toxic megacolon | **Vancomycin** $500\text{ mg}$ PO/NG QID **PLUS** Metronidazole $500\text{ mg}$ IV Q8H; rectal vancomycin enema if ileus; urgent surgical consult |
+### IDSA/SHEA severity classification
 
----
+The severity rules follow the 2017 IDSA/SHEA guideline definitions retained in the 2021 focused treatment update:
 
-### 2. Recurrent CDI Protocols
+| Classification | Implemented criterion |
+| --- | --- |
+| Non-severe | WBC ≤ 15,000 cells/µL **and** serum creatinine < 1.5 mg/dL |
+| Severe | WBC > 15,000 cells/µL **or** serum creatinine ≥ 1.5 mg/dL |
+| Fulminant | Hypotension/shock, ileus, or megacolon |
 
-- **First Recurrence:**
-  - If Vancomycin was used initially: Fidaxomicin $200\text{ mg}$ PO BID $\times 10\text{ days}$ or extended-pulsed regimen.
-  - If Fidaxomicin was used initially: Vancomycin tapered and pulsed regimen.
-  - Consider Bezlotoxumab ($10\text{ mg/kg}$ IV single infusion) during antibacterial therapy to reduce further recurrence risk.
-- **Multiple Recurrences ($\ge 2$ prior episodes):**
-  - Fecal Microbiota Transplantation (FMT / FDA-approved live biotherapeutic product) following initial antibiotic induction.
+The current serum creatinine is assessed using the guideline's absolute threshold. A rise relative to a historical baseline is not used to assign IDSA/SHEA severity.
 
----
+Bowel perforation/peritonitis and ICU admission can be recorded as critical contextual findings. They are not relabeled as defining IDSA/SHEA fulminant criteria; perforation/peritonitis still triggers an urgent surgical-evaluation flag.
 
-### 3. ATLAS Severity Score Formulation
+### ATLAS score
 
-$$\text{ATLAS Score} = \text{Age} + \text{Temp} + \text{Leukocytes} + \text{Albumin} + \text{Systemic Antibiotics}$$
+ATLAS is implemented from the original five-component derivation:
 
-- Point range $0 - 10$:
-  - **$0 - 3$:** Low Risk ($\sim 0\% - 2\%$ 30-day mortality)
-  - **$4 - 5$:** Intermediate Risk ($\sim 5\% - 10\%$ mortality)
-  - **$6 - 7$:** High Risk ($\sim 15\% - 25\%$ mortality)
-  - **$8 - 10$:** Very High Risk ($> 35\%$ mortality)
+- **A**ge
+- **T**reatment with non-CDI systemic antibiotics during CDI therapy
+- **L**eukocyte count
+- serum **A**lbumin
+- **S**erum creatinine
 
----
+The score ranges from 0 to 10. The original derivation modeled clinical cure using:
 
-## Features
+`estimated cure (%) = 100 - 5.08 × ATLAS score`
 
-- **IDSA / SHEA 2017 & 2021 Compliant:** Precise algorithmic categorization into Non-Severe, Severe, and Fulminant.
-- **ATLAS Score Calculator:** Computes bedside mortality and cure prediction score.
-- **High-Throughput Batch Processing:** Batch evaluation of hospital epidemiological registries from CSV.
-- **Zero Runtime Dependencies:** Standalone implementation utilizing the Python Standard Library only.
+This project reports that treatment-response estimate and a descriptive score band. It does **not** convert ATLAS into unvalidated mortality-risk categories.
 
----
+## Browser application
 
-## Installation & Requirements
+The browser interface runs the repository's Python grading module client-side with Pyodide. Case inputs are not sent to this repository or stored by the application. The browser does download the Pyodide runtime from jsDelivr when the page loads.
 
-- Python 3.10+ (tested on 3.10, 3.11, 3.12)
-- Zero external runtime dependencies.
+Features include:
+
+- compact responsive layout
+- light theme with a dark-mode toggle
+- severity, recurrence, treatment, and ATLAS output
+- explicit fulminant and surgical-alert handling
+- loading, validation, and runtime-error states
+- keyboard-accessible labels, controls, and focus states
+
+The first load can take longer because the Python/WebAssembly runtime must be downloaded. Subsequent behavior depends on browser caching and network conditions.
+
+## Command-line use
+
+Python 3.10 or newer is recommended. The core application has no third-party runtime dependencies.
 
 ```bash
 git clone https://github.com/abusuraihsakhri/cdiff-shea-idsa-severity-grader.git
 cd cdiff-shea-idsa-severity-grader
 ```
 
----
+Grade a case:
 
-## CLI Usage
-
-### 1. Grade a CDI Case
 ```bash
 python cli.py grade --wbc 18500 --creatinine 1.8
 ```
 
-### 2. Evaluate Fulminant Case with ATLAS Score
+Grade a fulminant case and calculate ATLAS:
+
 ```bash
-python cli.py grade --wbc 24000 --creatinine 2.4 --shock --ileus --age 74 --temp 39.0 --albumin 2.2 --abx
+python cli.py grade \
+  --wbc 24000 \
+  --creatinine 2.4 \
+  --shock \
+  --ileus \
+  --age 74 \
+  --albumin 2.2 \
+  --abx
 ```
 
-### 3. Batch Evaluate Cohorts from CSV
+Calculate ATLAS directly:
+
+```bash
+python cli.py atlas \
+  --age 74 \
+  --wbc 19000 \
+  --creatinine 2.0 \
+  --albumin 2.3 \
+  --abx
+```
+
+Batch-process a CSV:
+
 ```bash
 python cli.py batch --input sample.csv --output results.csv
 ```
 
----
-
-## Python API Quickstart
+## Python API
 
 ```python
-from cdiff_grader import grade_cdiff_severity, CDiffPatientInput, FulminantCriteria
+from cdiff_grader import CDiffPatientInput, grade_cdiff_severity
 
 patient = CDiffPatientInput(
     wbc_count=18500,
     serum_creatinine=1.8,
-    baseline_creatinine=1.0,
     age=68,
-    body_temperature_c=38.5,
     serum_albumin_g_dl=2.9,
-    concomitant_antibiotics=True
+    concomitant_antibiotics=True,
 )
 
 result = grade_cdiff_severity(patient)
-print(f"Severity Tier: {result.severity.value}")
-print(f"Preferred Treatment: {result.treatment.preferred_regimen}")
+
+print(result.severity.value)
+print(result.treatment.preferred_regimen)
+
 if result.atlas_score:
-    print(f"ATLAS Score: {result.atlas_score.score}/10 ({result.atlas_score.risk_tier.value})")
+    print(result.atlas_score.score)
+    print(result.atlas_score.estimated_cure_rate_percentage)
 ```
 
----
+## Local browser development
 
-## Testing & Verification
-
-Run the test suite:
+Serve the repository over HTTP so the browser can fetch the Python module:
 
 ```bash
-python -m pytest -p no:zarr
+python -m http.server 8000
 ```
 
+Then open `http://localhost:8000/`.
+
+The browser app requires JavaScript, WebAssembly, and network access to the pinned Pyodide CDN on initial load.
+
+## Testing
+
+Install the test-only dependency and run the suite:
+
+```bash
+python -m pip install "pytest>=8,<10"
+python -m pytest -v
+```
+
+CI also compiles the source and smoke-tests severity grading, direct ATLAS scoring, and CSV batch processing on Python 3.10 through 3.14.
+
+## References
+
+- McDonald LC, Gerding DN, Johnson S, et al. IDSA/SHEA 2017 Clinical Practice Guidelines for CDI. *Clin Infect Dis.* 2018;66(7):e1-e48. doi:10.1093/cid/cix1085.
+- Johnson S, Lavergne V, Skinner AM, et al. IDSA/SHEA 2021 Focused Update for CDI in Adults. *Clin Infect Dis.* 2021;73(5):e1029-e1044. doi:10.1093/cid/ciab549.
+- Miller MA, Louie T, Mullane K, et al. Derivation and validation of the ATLAS bedside scoring system for CDI treatment response. *BMC Infect Dis.* 2013;13:148. doi:10.1186/1471-2334-13-148.
+
+## License
+
+MIT. See [LICENSE](LICENSE).
