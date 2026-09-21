@@ -3,8 +3,8 @@
 SHEA / IDSA Clostridioides Difficile Infection (CDI) Severity Grader
 ===================================================================
 A clinical decision support engine implementing the IDSA / SHEA 2017 & 2021
-guidelines for CDI severity staging, ATLAS score mortality risk stratification,
-and evidence-based therapeutic regimen recommendation.
+guidelines for CDI severity staging, ATLAS treatment-response scoring,
+and guideline-based therapeutic regimen recommendations.
 
 References:
 - McDonald LC, Gerding DN, Johnson S, et al. Clinical Practice Guidelines
@@ -20,7 +20,6 @@ References:
   and metronidazole for the treatment of C. diff, stratified by severity.
   Clin Infect Dis. 2007;45(3):302-307.
 
-Author: Clinical AI & Domain Engineering
 License: MIT
 """
 
@@ -49,16 +48,21 @@ class EpisodeType(str, Enum):
     MULTIPLE_RECURRENCE = "MULTIPLE_RECURRENCE" # >= 2 recurrences
 
 
-class AtlasMortalityRisk(str, Enum):
-    LOW = "LOW_RISK"                  # Score 0 - 2 (Mortality ~0-2%)
-    INTERMEDIATE = "INTERMEDIATE_RISK"# Score 3 - 5 (Mortality ~5-12%)
-    HIGH = "HIGH_RISK"                # Score 6 - 7 (Mortality ~20-30%)
-    VERY_HIGH = "VERY_HIGH_RISK"      # Score 8 - 10 (Mortality > 35%)
+class AtlasScoreBand(str, Enum):
+    """Descriptive ATLAS score bands; these are not validated mortality categories."""
+    LOW = "LOW_SCORE"                   # 0-2
+    INTERMEDIATE = "INTERMEDIATE_SCORE" # 3-5
+    HIGH = "HIGH_SCORE"                 # 6-7
+    VERY_HIGH = "VERY_HIGH_SCORE"       # 8-10
+
+
+# Backwards-compatible import alias. The original repository exposed this name,
+# but ATLAS was derived to predict treatment response, not mortality strata.
+AtlasMortalityRisk = AtlasScoreBand
 
 
 WBC_SEVERE_THRESHOLD = 15000.0        # cells/uL or 15.0 x 10^9/L
 SCR_SEVERE_THRESHOLD = 1.5            # mg/dL
-SCR_BASELINE_RATIO_THRESHOLD = 1.5    # 50% increase over baseline
 
 
 # ==============================================================================
@@ -74,16 +78,24 @@ class FulminantCriteria:
     bowel_perforation_or_peritonitis: bool = False
     icu_admission_for_cdi: bool = False
 
-    def is_present(self) -> bool:
+    def meets_idsa_fulminant_definition(self) -> bool:
+        """Return True for the IDSA/SHEA defining fulminant features."""
         return (
             self.hypotension_or_shock
             or self.ileus
             or self.toxic_megacolon
+        )
+
+    def is_present(self) -> bool:
+        """Return True when any recorded critical complication is present."""
+        return (
+            self.meets_idsa_fulminant_definition()
             or self.bowel_perforation_or_peritonitis
             or self.icu_admission_for_cdi
         )
 
     def positive_list(self) -> List[str]:
+        """IDSA/SHEA fulminant defining features that are present."""
         pos = []
         if self.hypotension_or_shock:
             pos.append("Hypotension / Septic Shock")
@@ -91,6 +103,11 @@ class FulminantCriteria:
             pos.append("Paralytic Ileus")
         if self.toxic_megacolon:
             pos.append("Toxic Megacolon")
+        return pos
+
+    def additional_critical_complications(self) -> List[str]:
+        """Recorded critical findings that are not defining fulminant criteria."""
+        pos = []
         if self.bowel_perforation_or_peritonitis:
             pos.append("Bowel Perforation / Peritonitis")
         if self.icu_admission_for_cdi:
@@ -135,6 +152,8 @@ class CDiffPatientInput:
             errors.append(f"Body temperature {self.body_temperature_c} C is out of realistic range (30-45 C).")
         if self.serum_albumin_g_dl is not None and not (0.5 <= self.serum_albumin_g_dl <= 7.0):
             errors.append(f"Serum albumin {self.serum_albumin_g_dl} g/dL is out of realistic range (0.5-7.0).")
+        if self.prior_recurrence_count < 0:
+            errors.append("Prior recurrence count cannot be negative.")
         return errors
 
 
@@ -154,18 +173,31 @@ class TreatmentRecommendation:
 
 @dataclass
 class AtlasScoreResult:
-    """Calculation result for the ATLAS CDI Severity & Mortality Score."""
-    score: int                              # 0 to 10
-    risk_tier: AtlasMortalityRisk
-    predicted_mortality_percentage: str
+    """ATLAS treatment-response score result (Miller et al., 2013)."""
+    score: int
+    score_band: AtlasScoreBand
+    estimated_cure_rate_percentage: float
     component_breakdown: Dict[str, int]
+
+    @property
+    def risk_tier(self) -> AtlasScoreBand:
+        """Backwards-compatible alias for the descriptive score band."""
+        return self.score_band
+
+    @property
+    def predicted_mortality_percentage(self) -> None:
+        """ATLAS does not provide a validated mortality percentage."""
+        return None
 
     def to_dict(self) -> Dict[str, Any]:
         return {
             "score": self.score,
-            "risk_tier": self.risk_tier.value,
-            "predicted_mortality_percentage": self.predicted_mortality_percentage,
+            "score_band": self.score_band.value,
+            "estimated_cure_rate_percentage": self.estimated_cure_rate_percentage,
             "component_breakdown": self.component_breakdown,
+            # Backwards-compatible keys retained without asserting mortality risk.
+            "risk_tier": self.score_band.value,
+            "predicted_mortality_percentage": None,
         }
 
 
@@ -224,34 +256,50 @@ def grade_cdiff_severity(patient_input: Union[CDiffPatientInput, Dict[str, Any]]
     norm_wbc = inp.normalized_wbc()
     scr = inp.serum_creatinine
 
-    # Evaluate criteria
-    wbc_elevated = norm_wbc >= WBC_SEVERE_THRESHOLD
-    if inp.baseline_creatinine is not None:
-        creatinine_elevated = (scr >= SCR_SEVERE_THRESHOLD) or (scr >= inp.baseline_creatinine * SCR_BASELINE_RATIO_THRESHOLD)
-    else:
-        creatinine_elevated = scr >= SCR_SEVERE_THRESHOLD
+    # Evaluate IDSA/SHEA severity criteria.
+    # The 2017 guideline changed creatinine severity assessment from a
+    # baseline-relative rule to the absolute serum creatinine threshold.
+    wbc_elevated = norm_wbc > WBC_SEVERE_THRESHOLD
+    creatinine_elevated = scr >= SCR_SEVERE_THRESHOLD
 
     fulminant_pos = inp.fulminant_criteria.positive_list()
-    has_fulminant = len(fulminant_pos) > 0
+    has_fulminant = inp.fulminant_criteria.meets_idsa_fulminant_definition()
 
     # Severity Tier Determination
     if has_fulminant:
         severity = CDISeverity.FULMINANT
-        rationale = f"Fulminant CDI: Patient exhibits severe CDI with critical systemic/colonic complications: {', '.join(fulminant_pos)}."
+        rationale = (
+            "Fulminant CDI: IDSA/SHEA defining feature(s) present: "
+            + ", ".join(fulminant_pos)
+            + "."
+        )
     elif wbc_elevated or creatinine_elevated:
         severity = CDISeverity.SEVERE
         reasons = []
         if wbc_elevated:
-            reasons.append(f"WBC ({norm_wbc:.0f} cells/uL) >= {WBC_SEVERE_THRESHOLD:.0f}")
+            reasons.append(
+                f"WBC ({norm_wbc:.0f} cells/uL) > {WBC_SEVERE_THRESHOLD:.0f}"
+            )
         if creatinine_elevated:
-            if inp.baseline_creatinine:
-                reasons.append(f"SCr ({scr:.2f} mg/dL) >= 1.5x baseline ({inp.baseline_creatinine:.2f} mg/dL)")
-            else:
-                reasons.append(f"SCr ({scr:.2f} mg/dL) >= {SCR_SEVERE_THRESHOLD} mg/dL")
+            reasons.append(
+                f"SCr ({scr:.2f} mg/dL) >= {SCR_SEVERE_THRESHOLD} mg/dL"
+            )
         rationale = f"Severe CDI: Laboratory criteria met ({'; '.join(reasons)})."
     else:
         severity = CDISeverity.NON_SEVERE
-        rationale = f"Non-Severe CDI: WBC ({norm_wbc:.0f} cells/uL) < 15,000 and SCr ({scr:.2f} mg/dL) < 1.5 mg/dL without fulminant features."
+        rationale = (
+            f"Non-Severe CDI: WBC ({norm_wbc:.0f} cells/uL) <= 15,000 and "
+            f"SCr ({scr:.2f} mg/dL) < 1.5 mg/dL without IDSA/SHEA fulminant features."
+        )
+
+    extra_critical = inp.fulminant_criteria.additional_critical_complications()
+    if extra_critical:
+        rationale += (
+            " Additional critical finding(s) recorded but not part of the "
+            "IDSA/SHEA fulminant definition: "
+            + ", ".join(extra_critical)
+            + "."
+        )
 
     # Determine episode classification
     if inp.prior_recurrence_count >= 2 or inp.episode_type == EpisodeType.MULTIPLE_RECURRENCE:
@@ -264,9 +312,10 @@ def grade_cdiff_severity(patient_input: Union[CDiffPatientInput, Dict[str, Any]]
     # Generate Guideline Treatment Recommendation
     treatment = _generate_treatment_plan(severity, ep_type, inp)
 
-    # Calculate ATLAS Score if parameters available
+    # Calculate ATLAS only when ATLAS-specific inputs are supplied.
+    # calculate_atlas_score validates that all required components are present.
     atlas_res = None
-    if inp.age is not None or inp.serum_albumin_g_dl is not None or inp.body_temperature_c is not None:
+    if inp.age is not None or inp.serum_albumin_g_dl is not None:
         atlas_res = calculate_atlas_score(inp)
 
     return CDiffSeverityResult(
@@ -285,13 +334,30 @@ def grade_cdiff_severity(patient_input: Union[CDiffPatientInput, Dict[str, Any]]
 
 def calculate_atlas_score(patient_input: CDiffPatientInput) -> AtlasScoreResult:
     """
-    Computes the ATLAS CDI Mortality Prediction Score (Miller et al., 2013).
-    Range: 0 to 10 points.
-    """
-    breakdown = {}
+    Compute the five-component ATLAS score from Miller et al. (2013).
 
-    # 1. Age (0, 1, 2 pts)
-    age = patient_input.age if patient_input.age is not None else 50
+    ATLAS uses age, systemic antibiotic treatment, leukocyte count, serum
+    albumin, and serum creatinine. The original derivation correlated the
+    0-10 score with clinical cure after CDI therapy; it did not define
+    validated mortality-risk tiers.
+    """
+    errors = patient_input.validate()
+    if errors:
+        raise ValueError("Invalid CDI patient inputs: " + "; ".join(errors))
+
+    missing = []
+    if patient_input.age is None:
+        missing.append("age")
+    if patient_input.serum_albumin_g_dl is None:
+        missing.append("serum albumin")
+    if missing:
+        raise ValueError(
+            "ATLAS score requires " + " and ".join(missing) + "."
+        )
+
+    breakdown: Dict[str, int] = {}
+
+    age = patient_input.age
     if age < 60:
         age_pts = 0
     elif age < 80:
@@ -300,17 +366,10 @@ def calculate_atlas_score(patient_input: CDiffPatientInput) -> AtlasScoreResult:
         age_pts = 2
     breakdown["age_score"] = age_pts
 
-    # 2. Temperature (0, 1, 2 pts)
-    temp = patient_input.body_temperature_c if patient_input.body_temperature_c is not None else 37.0
-    if temp < 37.5:
-        temp_pts = 0
-    elif temp <= 38.5:
-        temp_pts = 1
-    else:
-        temp_pts = 2
-    breakdown["temperature_score"] = temp_pts
+    # Treatment with non-CDI systemic antibiotics during CDI therapy.
+    abx_pts = 2 if patient_input.concomitant_antibiotics else 0
+    breakdown["systemic_antibiotics_score"] = abx_pts
 
-    # 3. Leukocyte count (0, 1, 2 pts)
     wbc = patient_input.normalized_wbc()
     if wbc < 16000:
         wbc_pts = 0
@@ -320,8 +379,7 @@ def calculate_atlas_score(patient_input: CDiffPatientInput) -> AtlasScoreResult:
         wbc_pts = 2
     breakdown["leukocyte_score"] = wbc_pts
 
-    # 4. Albumin (0, 1, 2 pts)
-    alb = patient_input.serum_albumin_g_dl if patient_input.serum_albumin_g_dl is not None else 3.6
+    alb = patient_input.serum_albumin_g_dl
     if alb > 3.5:
         alb_pts = 0
     elif alb >= 2.6:
@@ -330,30 +388,34 @@ def calculate_atlas_score(patient_input: CDiffPatientInput) -> AtlasScoreResult:
         alb_pts = 2
     breakdown["albumin_score"] = alb_pts
 
-    # 5. Systemic non-CDI Antibiotics (0 or 2 pts)
-    abx_pts = 2 if patient_input.concomitant_antibiotics else 0
-    breakdown["concomitant_abx_score"] = abx_pts
+    # Original thresholds were reported in micromol/L: <=120, 121-179, >=180.
+    scr_umol_l = patient_input.serum_creatinine * 88.4
+    if scr_umol_l <= 120:
+        scr_pts = 0
+    elif scr_umol_l < 180:
+        scr_pts = 1
+    else:
+        scr_pts = 2
+    breakdown["serum_creatinine_score"] = scr_pts
 
     total_score = sum(breakdown.values())
 
-    # Mortality Risk Stratification
     if total_score <= 2:
-        tier = AtlasMortalityRisk.LOW
-        mort_pct = "< 2% 30-day mortality"
+        band = AtlasScoreBand.LOW
     elif total_score <= 5:
-        tier = AtlasMortalityRisk.INTERMEDIATE
-        mort_pct = "5% - 12% 30-day mortality"
+        band = AtlasScoreBand.INTERMEDIATE
     elif total_score <= 7:
-        tier = AtlasMortalityRisk.HIGH
-        mort_pct = "20% - 30% 30-day mortality"
+        band = AtlasScoreBand.HIGH
     else:
-        tier = AtlasMortalityRisk.VERY_HIGH
-        mort_pct = "> 35% 30-day mortality"
+        band = AtlasScoreBand.VERY_HIGH
+
+    # Regression from the derivation cohort: predicted cure = 100 - 5.08*score.
+    estimated_cure = round(max(0.0, 100.0 - (5.08 * total_score)), 1)
 
     return AtlasScoreResult(
         score=total_score,
-        risk_tier=tier,
-        predicted_mortality_percentage=mort_pct,
+        score_band=band,
+        estimated_cure_rate_percentage=estimated_cure,
         component_breakdown=breakdown,
     )
 
@@ -363,66 +425,108 @@ def _generate_treatment_plan(
     episode_type: EpisodeType,
     inp: CDiffPatientInput
 ) -> TreatmentRecommendation:
-    """Generates IDSA/SHEA 2021 guideline therapeutic regimen."""
+    """Generate treatment guidance aligned with IDSA/SHEA 2017 and 2021."""
     adjunctive = [
-        "Discontinue inciting/unnecessary antimicrobial agents as soon as clinically feasible.",
-        "Avoid anti-peristaltic / anti-motility agents (e.g. loperamide, diphenoxylate/atropine).",
-        "Implement Contact Precautions (gloves, gown, soap & water hand hygiene; alcohol sanitizer is sporicidally ineffective).",
+        "Discontinue unnecessary inciting antimicrobial agents as soon as clinically feasible.",
+        "Avoid anti-motility agents when ileus, toxic megacolon, or other contraindications are present.",
+        "Use appropriate CDI transmission-based precautions and environmental sporicidal cleaning.",
     ]
 
     infection_control = [
-        "Private room with dedicated toilet.",
-        "Washing hands with soap and water before and after patient contact (spores resistant to alcohol).",
-        "Sporicidal cleaning / disinfection of patient room (e.g., sodium hypochlorite / bleach-based solutions).",
+        "Private room with dedicated toilet when feasible.",
+        "Use gloves and gowns for room entry and patient care.",
+        "Use soap-and-water handwashing preferentially after CDI care, especially during outbreaks.",
+        "Use an EPA-registered sporicidal environmental disinfectant according to facility policy.",
     ]
 
     if severity == CDISeverity.FULMINANT:
-        preferred = "Vancomycin 500 mg PO/NG four times daily (QID) PLUS Metronidazole 500 mg IV every 8 hours (Q8H)."
-        alternative = "If ileus present, add Vancomycin retention enema 500 mg in 100 mL normal saline PR every 6 hours."
+        preferred = (
+            "Vancomycin 500 mg PO/NG four times daily (QID) PLUS "
+            "Metronidazole 500 mg IV every 8 hours (Q8H)."
+        )
+        alternative = (
+            "If ileus is present, add Vancomycin 500 mg in approximately "
+            "100 mL normal saline per rectum every 6 hours as a retention enema."
+        )
         surgical = True
         notes = (
-            "EMERGENCY: Fulminant CDI carries high mortality. Obtain urgent surgical consultation for consideration "
-            "of subtotal colectomy or diverting loop ileostomy with colonic lavage. Monitor closely in ICU."
+            "Fulminant CDI requires urgent multidisciplinary management. "
+            "Early surgical evaluation is appropriate for patients who are severely ill "
+            "or deteriorating; subtotal colectomy is the established operative approach "
+            "when surgery is required."
         )
         if inp.fulminant_criteria.ileus:
-            adjunctive.append("ILEUS DETECTED: Administer rectal vancomycin enemas (500 mg in 100 mL NS PR Q6H via Foley catheter with balloon inflated).")
+            adjunctive.append(
+                "ILEUS: Consider rectal vancomycin in addition to oral/NG vancomycin and IV metronidazole."
+            )
 
     elif episode_type == EpisodeType.INITIAL:
-        preferred = "Fidaxomicin 200 mg PO twice daily (BID) for 10 days (IDSA 2021 Preferred)."
-        alternative = "Vancomycin 125 mg PO four times daily (QID) for 10 days (Standard Alternative)."
+        preferred = "Fidaxomicin 200 mg PO twice daily (BID) for 10 days."
+        alternative = "Vancomycin 125 mg PO four times daily (QID) for 10 days."
         surgical = False
         notes = (
-            "Fidaxomicin is preferred over standard vancomycin due to lower sustained recurrence rates. "
-            "Oral metronidazole is NO LONGER recommended as first-line therapy unless vancomycin and fidaxomicin are inaccessible."
+            "IDSA/SHEA 2021 suggests fidaxomicin over a standard course of vancomycin "
+            "for an initial CDI episode; vancomycin remains an acceptable alternative. "
+            "For non-severe CDI, metronidazole is an alternative only when fidaxomicin "
+            "and vancomycin are unavailable."
         )
 
     elif episode_type == EpisodeType.FIRST_RECURRENCE:
-        prior = (inp.prior_regimen or "").upper()
-        if "VANCOMYCIN" in prior:
-            preferred = "Fidaxomicin 200 mg PO twice daily (BID) for 10 days OR Fidaxomicin extended-pulsed regimen (200 mg BID x 5 days, then every other day x 20 days)."
-            alternative = "Vancomycin tapered and pulsed regimen (e.g. 125 mg QID x 10-14 days, BID x 7 days, daily x 7 days, then every 2-3 days for 2-8 weeks)."
-        elif "FIDAXOMICIN" in prior:
-            preferred = "Vancomycin tapered and pulsed regimen."
-            alternative = "Fidaxomicin extended-pulsed regimen."
-        else:
-            preferred = "Fidaxomicin 200 mg PO BID for 10 days (or Vancomycin pulsed/tapered regimen)."
-            alternative = "Vancomycin 125 mg PO QID for 10 days."
-
+        preferred = (
+            "Fidaxomicin 200 mg PO twice daily for 10 days OR an extended-pulsed "
+            "fidaxomicin regimen (200 mg twice daily for 5 days, then once every other "
+            "day for 20 days)."
+        )
+        alternative = (
+            "Vancomycin by mouth in a tapered and pulsed regimen; a standard 10-day "
+            "vancomycin course is also an acceptable alternative for a first recurrence."
+        )
         surgical = False
-        adjunctive.append("Consider Bezlotoxumab 10 mg/kg IV single dose during antibacterial therapy for patients at high risk of recurrence (age >= 65, immunocompromised, severe CDI).")
+        adjunctive.append(
+            "For a recurrent CDI episode within the last 6 months, consider bezlotoxumab "
+            "10 mg/kg IV once during standard-of-care antibiotics when feasible; use caution "
+            "in patients with congestive heart failure."
+        )
         notes = (
-            "First recurrence management strategy depends on prior exposure. "
-            "Bezlotoxumab monoclonal antibody provides passive immunity against C. diff Toxin B and reduces subsequent recurrence risk."
+            "The 2021 focused update suggests fidaxomicin (standard or extended-pulsed) "
+            "over a standard vancomycin course for recurrent CDI. The recommendation does "
+            "not make prior vancomycin versus fidaxomicin exposure a severity criterion."
         )
 
-    else: # MULTIPLE_RECURRENCE (>= 2 prior episodes)
-        preferred = "Fecal Microbiota Transplantation (FMT / Live Biotherapeutic Product) following 10-14 day course of oral Vancomycin or Fidaxomicin."
-        alternative = "Vancomycin tapered and pulsed regimen OR Fidaxomicin 200 mg PO BID for 10 days followed by secondary prophylaxis."
+    else:  # MULTIPLE_RECURRENCE
+        preferred = (
+            "Fidaxomicin 200 mg PO twice daily for 10 days OR an extended-pulsed "
+            "fidaxomicin regimen."
+        )
+        alternative = (
+            "Vancomycin in a tapered and pulsed regimen, vancomycin followed by rifaximin, "
+            "or fecal microbiota transplantation after multiple recurrences that have "
+            "failed appropriate antibiotic treatments."
+        )
         surgical = False
-        adjunctive.append("Evaluate eligibility for FDA-approved fecal microbiota products (e.g., fecal microbiota spores / suspension).")
+        adjunctive.append(
+            "Consider fecal microbiota transplantation for multiple recurrences after "
+            "failure of appropriate antibiotic treatment, following current safety guidance."
+        )
         notes = (
-            "Patients with >= 2 recurrences (3rd episode total) should be referred for Fecal Microbiota Transplantation (FMT) "
-            "or live biotherapeutic products to restore colonic microbial diversity."
+            "IDSA/SHEA 2021 lists fidaxomicin, vancomycin-based strategies, and fecal "
+            "microbiota transplantation as options for patients with multiple recurrences."
+        )
+
+    if inp.fulminant_criteria.bowel_perforation_or_peritonitis:
+        surgical = True
+        adjunctive.append(
+            "BOWEL PERFORATION / PERITONITIS: Obtain urgent surgical evaluation."
+        )
+        notes += (
+            " Bowel perforation/peritonitis is a surgical emergency but is not itself "
+            "one of the three IDSA/SHEA defining fulminant criteria."
+        )
+
+    if inp.fulminant_criteria.icu_admission_for_cdi and severity != CDISeverity.FULMINANT:
+        notes += (
+            " ICU admission alone is not an IDSA/SHEA defining criterion for fulminant CDI; "
+            "classify using hypotension/shock, ileus, or megacolon."
         )
 
     return TreatmentRecommendation(
@@ -440,20 +544,38 @@ def _generate_treatment_plan(
 # ==============================================================================
 
 def _parse_dict_to_patient_input(d: Dict[str, Any]) -> CDiffPatientInput:
-    """Parses loose dictionary or CSV row into structured CDiffPatientInput."""
-    wbc = float(d.get("wbc_count", d.get("wbc", 10000.0)))
-    scr = float(d.get("serum_creatinine", d.get("creatinine", d.get("scr", 1.0))))
-    base_scr = d.get("baseline_creatinine", d.get("baseline_scr"))
-    base_scr_val = float(base_scr) if base_scr is not None and str(base_scr).strip() != "" else None
+    """Parse a dictionary or CSV row into a validated CDiffPatientInput."""
 
-    # Fulminant criteria parsing
+    def _required_float(keys: Tuple[str, ...], label: str) -> float:
+        for key in keys:
+            value = d.get(key)
+            if value is not None and str(value).strip() != "":
+                try:
+                    return float(value)
+                except (TypeError, ValueError) as exc:
+                    raise ValueError(f"{label} must be numeric.") from exc
+        raise ValueError(f"{label} is required.")
+
+    def _optional_float(keys: Tuple[str, ...]) -> Optional[float]:
+        for key in keys:
+            value = d.get(key)
+            if value is not None and str(value).strip() != "":
+                try:
+                    return float(value)
+                except (TypeError, ValueError) as exc:
+                    raise ValueError(f"{key} must be numeric.") from exc
+        return None
+
     def _to_bool(val: Any) -> bool:
         if isinstance(val, bool):
             return val
         if val is None:
             return False
-        s = str(val).strip().lower()
-        return s in ["true", "1", "yes", "y", "t"]
+        return str(val).strip().lower() in {"true", "1", "yes", "y", "t"}
+
+    wbc = _required_float(("wbc_count", "wbc"), "WBC count")
+    scr = _required_float(("serum_creatinine", "creatinine", "scr"), "Serum creatinine")
+    base_scr_val = _optional_float(("baseline_creatinine", "baseline_scr"))
 
     fulm_in = d.get("fulminant_criteria")
     if isinstance(fulm_in, dict):
@@ -461,39 +583,55 @@ def _parse_dict_to_patient_input(d: Dict[str, Any]) -> CDiffPatientInput:
             hypotension_or_shock=_to_bool(fulm_in.get("hypotension_or_shock")),
             ileus=_to_bool(fulm_in.get("ileus")),
             toxic_megacolon=_to_bool(fulm_in.get("toxic_megacolon")),
-            bowel_perforation_or_peritonitis=_to_bool(fulm_in.get("bowel_perforation_or_peritonitis")),
+            bowel_perforation_or_peritonitis=_to_bool(
+                fulm_in.get("bowel_perforation_or_peritonitis")
+            ),
             icu_admission_for_cdi=_to_bool(fulm_in.get("icu_admission_for_cdi")),
         )
     else:
         fulm = FulminantCriteria(
             hypotension_or_shock=_to_bool(d.get("hypotension")) or _to_bool(d.get("shock")),
             ileus=_to_bool(d.get("ileus")),
-            toxic_megacolon=_to_bool(d.get("toxic_megacolon")) or _to_bool(d.get("megacolon")),
-            bowel_perforation_or_peritonitis=_to_bool(d.get("perforation")) or _to_bool(d.get("peritonitis")),
-            icu_admission_for_cdi=_to_bool(d.get("icu")) or _to_bool(d.get("icu_admission")),
+            toxic_megacolon=_to_bool(d.get("toxic_megacolon"))
+            or _to_bool(d.get("megacolon")),
+            bowel_perforation_or_peritonitis=_to_bool(d.get("perforation"))
+            or _to_bool(d.get("peritonitis")),
+            icu_admission_for_cdi=_to_bool(d.get("icu"))
+            or _to_bool(d.get("icu_admission")),
         )
 
+    rec_raw = d.get("prior_recurrence_count", d.get("recurrences", 0))
+    if rec_raw is None or str(rec_raw).strip() == "":
+        rec_count = 0
+    else:
+        try:
+            rec_count = int(float(rec_raw))
+        except (TypeError, ValueError) as exc:
+            raise ValueError("Prior recurrence count must be numeric.") from exc
 
-    # Episode parsing
-    rec_count = int(float(d.get("prior_recurrence_count", d.get("recurrences", 0))))
-    ep_str = str(d.get("episode_type", "")).upper()
+    ep_str = str(d.get("episode_type", "")).strip().upper()
     if "MULT" in ep_str or rec_count >= 2:
         ep_type = EpisodeType.MULTIPLE_RECURRENCE
-    elif "FIRST" in ep_str or "1" in ep_str or rec_count == 1:
+    elif "FIRST" in ep_str or rec_count == 1:
         ep_type = EpisodeType.FIRST_RECURRENCE
     else:
         ep_type = EpisodeType.INITIAL
 
     age_val = d.get("age")
-    age = int(float(age_val)) if age_val is not None and str(age_val).strip() != "" else None
+    if age_val is not None and str(age_val).strip() != "":
+        try:
+            age = int(float(age_val))
+        except (TypeError, ValueError) as exc:
+            raise ValueError("Age must be numeric.") from exc
+    else:
+        age = None
 
-    temp_val = d.get("body_temperature_c", d.get("temperature", d.get("temp")))
-    temp = float(temp_val) if temp_val is not None and str(temp_val).strip() != "" else None
+    temp = _optional_float(("body_temperature_c", "temperature", "temp"))
+    alb = _optional_float(("serum_albumin_g_dl", "albumin", "alb"))
 
-    alb_val = d.get("serum_albumin_g_dl", d.get("albumin", d.get("alb")))
-    alb = float(alb_val) if alb_val is not None and str(alb_val).strip() != "" else None
-
-    concom_abx = bool(d.get("concomitant_antibiotics", d.get("concomitant_abx", False)))
+    concom_abx = _to_bool(
+        d.get("concomitant_antibiotics", d.get("concomitant_abx", False))
+    )
     prior_tx = d.get("prior_regimen")
 
     return CDiffPatientInput(
