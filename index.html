@@ -1,0 +1,221 @@
+<!doctype html>
+<html lang="en" data-theme="light">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="color-scheme" content="light dark">
+  <meta name="description" content="Browser-based IDSA/SHEA CDI severity grader with ATLAS treatment-response scoring.">
+  <title>CDI Severity Grader</title>
+  <link rel="stylesheet" href="./styles.css">
+  <script defer src="https://cdn.jsdelivr.net/pyodide/v314.0.7/full/pyodide.js"></script>
+  <script defer src="./app.js"></script>
+</head>
+<body>
+  <a class="skip-link" href="#case-form">Skip to calculator</a>
+
+  <div class="app-shell">
+    <header class="topbar">
+      <div>
+        <p class="eyebrow">IDSA / SHEA criteria</p>
+        <h1>CDI Severity Grader</h1>
+        <p class="subtitle">Severity classification and ATLAS treatment-response scoring</p>
+      </div>
+      <div class="header-actions">
+        <span id="runtime-status" class="status-pill" role="status" aria-live="polite">Loading Python runtime…</span>
+        <button id="theme-toggle" class="icon-button" type="button" aria-label="Switch to dark theme" title="Toggle theme">
+          <span aria-hidden="true">◐</span>
+        </button>
+      </div>
+    </header>
+
+    <main class="workspace">
+      <section class="panel input-panel" aria-labelledby="case-title">
+        <div class="panel-heading">
+          <div>
+            <p class="section-kicker">Patient inputs</p>
+            <h2 id="case-title">Case assessment</h2>
+          </div>
+          <button id="reset-button" class="text-button" type="button">Reset</button>
+        </div>
+
+        <form id="case-form" novalidate>
+          <div class="field-grid">
+            <label class="field">
+              <span>WBC count <b aria-hidden="true">*</b></span>
+              <div class="input-with-unit">
+                <input id="wbc" name="wbc" type="number" min="0.1" step="any" inputmode="decimal" value="12000" required>
+                <span>cells/µL</span>
+              </div>
+              <small>Values under 100 are interpreted as ×10⁹/L.</small>
+            </label>
+
+            <label class="field">
+              <span>Serum creatinine <b aria-hidden="true">*</b></span>
+              <div class="input-with-unit">
+                <input id="creatinine" name="creatinine" type="number" min="0.01" step="0.01" inputmode="decimal" value="1.0" required>
+                <span>mg/dL</span>
+              </div>
+              <small>Absolute threshold is used for IDSA/SHEA severity.</small>
+            </label>
+
+            <label class="field">
+              <span>Prior recurrences</span>
+              <select id="recurrences" name="recurrences">
+                <option value="0">0 — initial episode</option>
+                <option value="1">1 — first recurrence</option>
+                <option value="2">2 or more</option>
+              </select>
+            </label>
+
+            <label class="field">
+              <span>Prior regimen</span>
+              <select id="prior-regimen" name="prior_regimen">
+                <option value="">Not specified</option>
+                <option value="FIDAXOMICIN">Fidaxomicin</option>
+                <option value="VANCOMYCIN">Vancomycin</option>
+                <option value="METRONIDAZOLE">Metronidazole</option>
+              </select>
+            </label>
+          </div>
+
+          <fieldset class="fieldset">
+            <legend>Fulminant features</legend>
+            <p class="fieldset-help">IDSA/SHEA defining features are marked <span class="required-dot">●</span>.</p>
+            <div class="check-grid">
+              <label class="check-card">
+                <input id="shock" name="shock" type="checkbox">
+                <span><strong>Hypotension / shock</strong><small>Defining criterion <span class="required-dot">●</span></small></span>
+              </label>
+              <label class="check-card">
+                <input id="ileus" name="ileus" type="checkbox">
+                <span><strong>Ileus</strong><small>Defining criterion <span class="required-dot">●</span></small></span>
+              </label>
+              <label class="check-card">
+                <input id="megacolon" name="megacolon" type="checkbox">
+                <span><strong>Megacolon</strong><small>Defining criterion <span class="required-dot">●</span></small></span>
+              </label>
+              <label class="check-card secondary">
+                <input id="perforation" name="perforation" type="checkbox">
+                <span><strong>Perforation / peritonitis</strong><small>Critical finding</small></span>
+              </label>
+              <label class="check-card secondary">
+                <input id="icu" name="icu" type="checkbox">
+                <span><strong>ICU admission for CDI</strong><small>Contextual finding</small></span>
+              </label>
+            </div>
+          </fieldset>
+
+          <fieldset class="fieldset atlas-fields">
+            <legend>ATLAS score <span class="optional">optional</span></legend>
+            <p class="fieldset-help">Enter both age and albumin to calculate ATLAS. WBC and creatinine above are reused.</p>
+            <div class="field-grid atlas-grid">
+              <label class="field">
+                <span>Age</span>
+                <div class="input-with-unit">
+                  <input id="age" name="age" type="number" min="0" max="125" step="1" inputmode="numeric" placeholder="e.g. 68">
+                  <span>years</span>
+                </div>
+              </label>
+              <label class="field">
+                <span>Serum albumin</span>
+                <div class="input-with-unit">
+                  <input id="albumin" name="albumin" type="number" min="0.5" max="7" step="0.1" inputmode="decimal" placeholder="e.g. 3.0">
+                  <span>g/dL</span>
+                </div>
+              </label>
+              <label class="check-card inline-check">
+                <input id="abx" name="abx" type="checkbox">
+                <span><strong>Systemic antibiotics</strong><small>Non-CDI antibiotics during treatment</small></span>
+              </label>
+            </div>
+          </fieldset>
+
+          <div id="form-error" class="form-error" role="alert" hidden></div>
+
+          <div class="form-actions">
+            <button id="analyze-button" class="primary-button" type="submit" disabled>
+              Analyze case
+            </button>
+            <span class="privacy-note">Runs locally in your browser. No patient data are uploaded or stored.</span>
+          </div>
+        </form>
+      </section>
+
+      <section class="panel result-panel" aria-labelledby="result-title" aria-live="polite">
+        <div class="panel-heading">
+          <div>
+            <p class="section-kicker">Calculated output</p>
+            <h2 id="result-title">Assessment</h2>
+          </div>
+          <span id="severity-badge" class="severity-badge neutral">Not calculated</span>
+        </div>
+
+        <div id="empty-state" class="empty-state">
+          <div class="empty-icon" aria-hidden="true">↗</div>
+          <h3>Ready for a case</h3>
+          <p>Enter the required laboratory values, select any relevant clinical findings, then choose <strong>Analyze case</strong>.</p>
+        </div>
+
+        <div id="result-content" class="result-content" hidden>
+          <div class="metric-grid">
+            <article class="metric">
+              <span>Severity</span>
+              <strong id="severity-value">—</strong>
+            </article>
+            <article class="metric">
+              <span>Episode</span>
+              <strong id="episode-value">—</strong>
+            </article>
+            <article class="metric">
+              <span>ATLAS</span>
+              <strong id="atlas-value">Not calculated</strong>
+            </article>
+          </div>
+
+          <article class="result-block">
+            <h3>Rationale</h3>
+            <p id="rationale-value"></p>
+          </article>
+
+          <div class="treatment-grid">
+            <article class="result-block">
+              <h3>Preferred treatment</h3>
+              <p id="preferred-value"></p>
+            </article>
+            <article class="result-block">
+              <h3>Alternative</h3>
+              <p id="alternative-value"></p>
+            </article>
+          </div>
+
+          <article id="surgical-alert" class="alert-block" hidden>
+            <strong>Urgent surgical evaluation indicated</strong>
+            <span>Review the clinical context and local escalation pathway.</span>
+          </article>
+
+          <details class="details-block">
+            <summary>Adjunctive measures and notes</summary>
+            <div class="details-content">
+              <h4>Adjunctive measures</h4>
+              <ul id="adjunctive-list"></ul>
+              <h4>Infection control</h4>
+              <ul id="infection-list"></ul>
+              <h4>Clinical note</h4>
+              <p id="clinical-note"></p>
+            </div>
+          </details>
+        </div>
+
+        <footer class="clinical-footer">
+          <strong>Clinical scope</strong>
+          <p>This tool implements published criteria for educational and decision-support use. It does not diagnose CDI, replace clinician judgment, or account for every patient-specific contraindication or local policy.</p>
+          <div class="reference-links">
+            <a href="https://www.idsociety.org/practice-guideline/clostridioides-difficile-2021-focused-update/" target="_blank" rel="noopener noreferrer">IDSA/SHEA 2021</a>
+            <a href="https://pmc.ncbi.nlm.nih.gov/articles/PMC3618004/" target="_blank" rel="noopener noreferrer">ATLAS derivation</a>
+          </div>
+        </footer>
+      </section>
+    </main>
+  </div>
+</body>
+</html>
