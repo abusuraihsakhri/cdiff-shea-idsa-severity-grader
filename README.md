@@ -1,5 +1,7 @@
 # CDI Severity Grader
 
+### [Open the Live Application →](https://abusuraihsakhri.github.io/cdiff-shea-idsa-severity-grader/)
+
 A small Python and browser-based tool for classifying adult *Clostridioides difficile* infection (CDI) severity using IDSA/SHEA criteria and calculating the published ATLAS treatment-response score.
 
 The repository provides the same core grading logic through a command-line interface, Python API, CSV batch processor, and a browser interface powered by Pyodide.
