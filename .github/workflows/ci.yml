@@ -35,6 +35,9 @@ jobs:
       - name: Run test suite
         run: python -m pytest -v
 
+      - name: Check browser JavaScript syntax
+        run: node --check app.js
+
       - name: Verify CLI severity grading
         run: >
           python cli.py grade
